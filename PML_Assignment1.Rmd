@@ -1,0 +1,166 @@
+---
+title: "Practical Machine Learning Assignment"
+output: html_document
+date: "25.01.2015"
+keep_md: true
+---
+
+#Executive Summary
+Using devices such as Jawbone Up, Nike FuelBand, and Fitbit it is now possible to collect a large amount of data about personal activity relatively inexpensively. These type of devices are part of the quantified self movement - a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. 
+
+One thing that people regularly do is quantify how much of a particular activity they do, but they rarely quantify how well they do it. In this project, we will use data from accelerometers on the belt, forearm, arm, and dumbell of 6 participants. They were asked to perform barbell lifts correctly and incorrectly in 5 different ways. More information is available from the website here: http://groupware.les.inf.puc-rio.br/har (see the section on the Weight Lifting Exercise Dataset). The goal of this analysis is to predict the manner in which they did the exercise. The dependent variable or response is the "classe" variable in the training set.
+
+# Loading and preprocessing the data
+
+The training data for this project are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+
+The test data are available here: 
+
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+The data for this project come from this source: http://groupware.les.inf.puc-rio.br/har.
+
+We begin by loading the required libraries and reading in the training and testing datasets, assigning missing values to entries that are currently 'NA' or blank.
+
+```{r}
+#install.packages("corrplot")
+#install.packages("e1071")
+#install.packages("randomForest")
+
+require(corrplot)
+library(corrplot)
+library(caret)
+library(e1071)
+```
+
+```{r}
+setwd("C:\\Users\\Katharine\\Documents\\GitHub\\MachineLearning_PeerAssessment1")
+
+#download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv", destfile = "./pml-training.csv")
+#download.file("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv", destfile = "./pml-testing.csv")
+
+trainingOrg <- read.csv("pml-training.csv", header = TRUE, na.strings = c("NA", ""))
+testingOrg <- read.csv("pml-testing.csv", header = TRUE, na.strings = c("NA", ""))
+dim(trainingOrg)
+dim(testingOrg)
+```
+
+To reduce the number of predictors:
+
+- Remove variables that have too many missing values
+- Remove irrelevant variables that are unlikely to be related to the dependent variable
+
+Columns in the orignal training and testing datasets that are mostly filled with missing values are removed. To do this, count the number of missing values in each column of the full training dataset. We use those sums to create a logical variable for each column of the dataset. The logical variable's value is 'TRUE' if a column has no missing values (i.e. if the colSums = 0). If there are missing values in the column, the logical variable's value corresponding to that column will be 'FALSE'.
+
+Applying the logical variable to the columns of the training and testing datasets will only keep those columns that are complete. (Note: This is a way of applying the 'complete.cases' function to the columns of a dataset.)
+
+Our updated training dataset now has fewer variables to review in our analysis. Further, our final testing dataset has consistent columns in it (when compared with those in our slimmed-down training dataset). This will allow the fitted model (based on our training data) to be applied to the testing dataset.
+
+```{r}
+training.dena <- trainingOrg[ , colSums(is.na(trainingOrg)) == 0]
+#head(training1)
+#training3 <- training.decor[ rowSums(is.na(training.decor)) == 0, ]
+dim(training.dena)
+```
+
+Create another logical vector to delete additional unnecessary columns from the pared-down training and testing datasets. Since these are the columns we want to remove, we apply the negation of the logical vector against the columns of our dataset.
+
+```{r}
+remove = c('X', 'user_name', 'raw_timestamp_part_1', 'raw_timestamp_part_2', 'cvtd_timestamp', 'new_window', 'num_window')
+training.dere <- training.dena[, -which(names(training.dena) %in% remove)]
+dim(training.dere)
+```
+
+
+Check for numeric variables that have extremely low variance (this method is useful nearZeroVar()
+
+```{r}
+zeroVar= nearZeroVar(training.dere[sapply(training.dere, is.numeric)], saveMetrics = TRUE)
+training.nonzerovar = training.dere[,zeroVar[, 'nzv']==0]
+dim(training.nonzerovar)
+```
+
+Remove highly correlated numeric variables 90%
+
+```{r}
+corrMatrix <- cor(na.omit(training.nonzerovar[sapply(training.nonzerovar, is.numeric)]))
+dim(corrMatrix)
+```
+
+```{r}
+#Given that there are 52 variables
+corrDF <- expand.grid(row = 1:52, col = 1:52)
+corrDF$correlation <- as.vector(corrMatrix)
+levelplot(correlation ~ row+ col, corrDF)
+```
+
+```{r,echo=FALSE}
+removecor = findCorrelation(corrMatrix, cutoff = .90, verbose = TRUE)
+```
+
+```{r}
+training.decor = training.nonzerovar[,-removecor]
+dim(training.decor)
+```
+
+#Split data to training and testing for cross validation.
+
+We now split the updated training dataset into a training dataset (70% of the observations) and a validation dataset (30% of the observations). This validation dataset will allow us to perform cross validation when developing our model.
+
+```{r}
+inTrain <- createDataPartition(y=training.decor$classe, p=0.7, list=FALSE)
+training <- training.decor[inTrain,]; testing <- training.decor[-inTrain,]
+dim(training);dim(testing)
+```
+
+We got 13737 samples and 46 variables for training, 5885 samples and 46 variables for testing with the last column containing the 'classe' variable we are trying to predict. 
+
+#Analysis
+## Random Forests
+
+We train a model using a random forest approach on the smaller training dataset. We chose to specify the use of a cross validation method when applying the random forest routine in the 'trainControl()' parameter. Without specifying this, the default method (bootstrapping) would have been used. The bootstrapping method seemed to take a lot longer to complete, while essentially producing the same level of 'accuracy'.
+
+```{r}
+require(randomForest)
+set.seed(12345)
+```
+
+```{r}
+rf.training=randomForest(classe~.,data=training,ntree=100, importance=TRUE)
+rf.training
+#plot(rf.training, log="y")
+varImpPlot(rf.training,)
+#rf.training1=randomForest(classe~., data=training, proximity=TRUE )
+
+#DSplot(rf.training1, training$classe)
+
+```
+
+We can see which variables have higher impact on the prediction.
+
+
+#Cross Validation Testing and Out-of-Sample Error Estimate
+
+The Random Forest model shows OOB estimate of error rate using the training dataset. Now predict it for out-of sample accuracy by calling the 'predict' function so that the trained model can be applied to the cross validation test dataset.
+
+```{r}
+tree.pred=predict(rf.training,testing,type="class")
+predMatrix = with(testing,table(tree.pred,classe))
+sum(diag(predMatrix))/sum(as.vector(predMatrix)) # error rate
+```
+
+0.99 means we got a very accurate estimate.
+
+No. of variables tried at each split: 6. It means every time we only randomly use 6 predictors to grow the tree. And it seems 6 is enough to get the good result.
+
+
+#Predicted Results
+
+Finally, we apply the pre-processing to the original testing dataset from the website and display the predicted results.
+
+```{r}
+answers <- predict(rf.training, testingOrg)
+answers
+```
